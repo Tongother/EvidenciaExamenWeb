@@ -1,391 +1,60 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-// CAMBIO IMPORTANTE: Usaremos el cliente nativo HttpClient de dart:io
-import 'dart:io'; 
-
-const String _apiUrl = 'http://miapiunach.somee.com/api/Productos';
-
-class Item {
-  final String id;
-  final String nombre;
-  final double precio;
-  final int existencia;
-  final String fechaRegistro;
-
-  Item({
-    required this.id,
-    required this.nombre,
-    required this.precio,
-    required this.existencia,
-    required this.fechaRegistro
-  });
-
-  factory Item.fromJson(Map<String, dynamic> json) {
-    final idValue = json['id'];
-    String idString;
-    if (idValue is int) {
-      idString = idValue.toString();
-    } else if (idValue is String) {
-      idString = idValue;
-    } else {
-      throw FormatException("El ID no es ni String ni Int: $idValue");
-    }
-
-    return Item(
-      id: idString, 
-      nombre: json['nombre'] as String,
-      precio: (json['precio'] as num).toDouble(),
-      existencia: json['existencia'] as int,
-      fechaRegistro: json['fechaRegistro'] as String
-    );
-  }
-
-  Map<String, dynamic> toMapForPost() {
-    return {
-      "nombre": nombre,
-      "precio": precio,
-      "existencia": existencia,
-      "fechaRegistro": fechaRegistro,
-    };
-  }
-}
-
-// -----------------------------------------------------------------------------
-// *************** FUNCIONES PARA CONSUMIR LA API (USANDO HttpClient) ***************
-// Crear una instancia de HttpClient que se reutilizará
-final HttpClient _httpClient = HttpClient();
-
-
-/// 1. Obtener todos los productos (GET /api/Productos)
-Future<List<Item>> fetchItems() async {
-  Uri uri = Uri.parse(_apiUrl);
-  HttpClientRequest request = await _httpClient.getUrl(uri);
-  HttpClientResponse response = await request.close();
-
-  if (response.statusCode == 200) {
-    final responseBody = await response.transform(utf8.decoder).join();
-    // Asumiendo que el cuerpo es un objeto con una clave 'results' que es una lista.
-    final Map<String, dynamic> data = json.decode(responseBody);
-    final List<dynamic> results = data['results'];
-    
-    return results.map((json) => Item.fromJson(json)).toList();
-  } else {
-    throw Exception('Fallo al cargar productos: ${response.statusCode}');
-  }
-}
-
-
-/// 2. Obtener producto por ID (GET /api/Productos/{id})
-Future<Item> fetchItemById(String id) async {
-  Uri uri = Uri.parse('$_apiUrl/$id');
-  HttpClientRequest request = await _httpClient.getUrl(uri);
-  HttpClientResponse response = await request.close();
-  
-  if (response.statusCode == 200) {
-    final responseBody = await response.transform(utf8.decoder).join();
-    // Asumiendo que la respuesta es el objeto JSON del producto
-    return Item.fromJson(json.decode(responseBody));
-  } else {
-    throw Exception('Fallo al cargar el producto con ID $id. Código: ${response.statusCode}');
-  }
-}
-
-/// 3. Función para crear un nuevo producto (POST /api/Productos)
-Future<Item> createItem(Item newItem) async {
-  Uri uri = Uri.parse(_apiUrl);
-  HttpClientRequest request = await _httpClient.postUrl(uri);
-  
-  // Establecer encabezados
-  request.headers.set(HttpHeaders.contentTypeHeader, "application/json");
-  
-  final body = jsonEncode(newItem.toMapForPost());
-  
-  debugPrint('Enviando cuerpo POST: $body');
-  
-  // Escribir el cuerpo
-  request.write(body);
-
-  HttpClientResponse response = await request.close();
-  
-  if (response.statusCode >= 200 && response.statusCode <= 202) {
-    final responseBody = await response.transform(utf8.decoder).join();
-    return Item.fromJson(jsonDecode(responseBody));
-  } else {
-    final responseBody = await response.transform(utf8.decoder).join();
-    debugPrint('Fallo al crear item: ${response.statusCode} - $responseBody');
-    throw Exception('Fallo al crear item. Código de estado: ${response.statusCode}');
-  }
-}
-
-/// 4. Eliminar producto (DELETE /api/Productos/{id})
-Future<void> deleteItem(String id) async {
-  Uri uri = Uri.parse('$_apiUrl/$id');
-  HttpClientRequest request = await _httpClient.deleteUrl(uri);
-  HttpClientResponse response = await request.close();
-  
-  // Un DELETE exitoso generalmente devuelve 200 (OK) o 204 (No Content)
-  if (response.statusCode == 200 || response.statusCode == 204) {
-    debugPrint('Producto con ID $id eliminado exitosamente.');
-    // No hay cuerpo de respuesta que parsear
-  } else {
-    final responseBody = await response.transform(utf8.decoder).join();
-    debugPrint('Fallo al eliminar producto: ${response.statusCode} - $responseBody');
-    throw Exception('Fallo al eliminar producto. Código de estado: ${response.statusCode}');
-  }
-}
-
-// -----------------------------------------------------------------------------
+import 'pages/products_list_page.dart';
+import 'pages/product_by_id_page.dart';
+import 'pages/create_product_page.dart';
+import 'pages/delete_product_page.dart';
 
 void main() {
-  // Asegúrate de cerrar el cliente HTTP cuando la aplicación se detenga.
-  // En una aplicación real, lo manejarías en el `dispose` de un widget de nivel superior
-  // o al cerrar la aplicación. Por simplicidad en este ejemplo, no lo haremos aquí.
-  runApp(const MyApp());
+  runApp(const ProductosApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class ProductosApp extends StatelessWidget {
+  const ProductosApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Productos UNACH',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        useMaterial3: true,
-      ),
-      home: const ProductsListPage(),
+      title: 'Productos API',
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
+      initialRoute: '/',
+      routes: {
+        '/': (_) => const HomePage(),
+        '/list': (_) => const ProductsListPage(),
+        '/byId': (_) => const ProductByIdPage(),
+        '/create': (_) => const CreateProductPage(),
+        '/delete': (_) => const DeleteProductPage(),
+      },
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-
-// Página Principal (Stateful para manejar el estado de la API)
-class ProductsListPage extends StatefulWidget {
-  const ProductsListPage({super.key});
-
-  @override
-  State<ProductsListPage> createState() => _ProductsListPageState();
-}
-
-class _ProductsListPageState extends State<ProductsListPage> {
-  List<Item> _items = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchProducts();
-  }
-
-  // Función para consumir la API (GET ALL)
-  Future<void> _fetchProducts() async {
-    setState(() {
-      _isLoading = true;
-    });
-    try {
-      final List<Item> fetchedItems = await fetchItems();
-
-      setState(() {
-        _items = fetchedItems;
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('Error al cargar datos: $e');
-      setState(() {
-        _isLoading = false;
-      });
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al cargar productos: $e')),
-        );
-      }
-    }
-  }
-  
-  // Función para CREAR un producto y refrescar la lista
-  Future<void> _createNewProduct() async {
-    final newItem = Item(
-      id: "PENDING_ID", // Este ID se reemplazará en toMapForPost()
-      nombre: 'Nuevo Producto Test ${DateTime.now().second}',
-      precio: 105.50,
-      existencia: 5,
-      fechaRegistro: DateTime.now().toIso8601String(),
-    );
-
-    try {
-      await createItem(newItem);
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Producto creado exitosamente!')),
-        );
-      }
-      _fetchProducts(); // Refrescar la lista
-    } catch (e) {
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al crear producto: $e')),
-        );
-      }
-    }
-  }
-
-  // **NUEVA FUNCIÓN:** Eliminar un producto y refrescar la lista
-  Future<void> _deleteProductAndRefreshList(String id) async {
-    try {
-      await deleteItem(id);
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Producto con ID $id eliminado!')),
-        );
-      }
-      // Volver a cargar la lista después de la eliminación exitosa
-      _fetchProducts(); 
-    } catch (e) {
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al eliminar producto: $e')),
-        );
-      }
-    }
-  }
-
-
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
   @override
   Widget build(BuildContext context) {
+    final buttons = [
+      ('GET /api/Productos', '/list', Icons.list),
+      ('GET /api/Productos/{id}', '/byId', Icons.search),
+      ('POST /api/Productos', '/create', Icons.add),
+      ('DELETE /api/Productos/{id}', '/delete', Icons.delete),
+    ];
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Listado de Productos'),
-        backgroundColor: Colors.blue.shade600,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _fetchProducts,
-          ),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _items.isEmpty
-                    ? const Center(child: Text('No hay productos disponibles.'))
-                    : ListView.builder(
-                        itemCount: _items.length,
-                        itemBuilder: (context, index) {
-                          final item = _items[index];
-                          // Pasar la función de eliminación como callback
-                          return ProductListItem(
-                            item: item,
-                            onDelete: _deleteProductAndRefreshList,
-                          );
-                        },
-                      ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _createNewProduct,
-        tooltip: 'Agregar Producto',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-}
-
-//Widget para cada Item (AHORA con un botón de eliminación)
-class ProductListItem extends StatelessWidget {
-  final Item item;
-  // Callback para la eliminación
-  final Function(String id) onDelete; 
-
-  const ProductListItem({
-    super.key, 
-    required this.item,
-    required this.onDelete,
-  });
-
-  // Función para mostrar el diálogo de confirmación
-  void _confirmDelete(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar Eliminación'),
-        content: Text('¿Estás seguro de que quieres eliminar el producto "${item.nombre}" (ID: ${item.id})?'),
-        actions: <Widget>[
-          TextButton(
-            child: const Text('Cancelar'),
-            onPressed: () {
-              Navigator.of(ctx).pop(); // Cerrar diálogo
-            },
-          ),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Eliminar'),
-            onPressed: () {
-              Navigator.of(ctx).pop(); // Cerrar diálogo
-              onDelete(item.id); // Llamar a la función de eliminación
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      elevation: 3,
-      child: Container(
-        padding: const EdgeInsets.all(12.0),
-        child: Row(
-          children: <Widget>[
-            // Detalles del producto
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'ID: ${item.id}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    'Nombre: ${item.nombre}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Existencia: ${item.existencia.toString()}',
-                    style: const TextStyle(fontSize: 14),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Fecha: ${item.fechaRegistro.split('T')[0]}', // Mostrar solo la fecha
-                    style: const TextStyle(fontSize: 14),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Precio: \$${item.precio.toStringAsFixed(2)}',
-                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: () => _confirmDelete(context), // Mostrar diálogo de confirmación
-            ),
-          ],
-        ),
+      appBar: AppBar(title: const Text('Productos API · Demo')),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: buttons.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (_, i) {
+          final (label, route, icon) = (buttons[i].$1, buttons[i].$2, buttons[i].$3);
+          return ListTile(
+            leading: Icon(icon),
+            title: Text(label),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.pushNamed(context, route),
+            tileColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          );
+        },
       ),
     );
   }

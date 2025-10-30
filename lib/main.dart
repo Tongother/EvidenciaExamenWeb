@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+// CAMBIO IMPORTANTE: Usaremos el cliente nativo HttpClient de dart:io
+import 'dart:io'; 
+
 const String _apiUrl = 'http://miapiunach.somee.com/api/Productos';
 
 class Item {
@@ -37,8 +39,7 @@ class Item {
       fechaRegistro: json['fechaRegistro'] as String
     );
   }
-  
-  // 2. Método toMap() para preparar el cuerpo de la solicitud POST
+
   Map<String, dynamic> toMapForPost() {
     return {
       "nombre": nombre,
@@ -50,15 +51,21 @@ class Item {
 }
 
 // -----------------------------------------------------------------------------
-// *************** FUNCIONES PARA CONSUMIR LA API ***************
+// *************** FUNCIONES PARA CONSUMIR LA API (USANDO HttpClient) ***************
+// Crear una instancia de HttpClient que se reutilizará
+final HttpClient _httpClient = HttpClient();
 
-// Función para obtener TODOS los productos (GET /api/Productos)
+
+/// 1. Obtener todos los productos (GET /api/Productos)
 Future<List<Item>> fetchItems() async {
-  final response = await http.get(Uri.parse(_apiUrl));
-  
+  Uri uri = Uri.parse(_apiUrl);
+  HttpClientRequest request = await _httpClient.getUrl(uri);
+  HttpClientResponse response = await request.close();
+
   if (response.statusCode == 200) {
+    final responseBody = await response.transform(utf8.decoder).join();
     // Asumiendo que el cuerpo es un objeto con una clave 'results' que es una lista.
-    final Map<String, dynamic> data = json.decode(response.body);
+    final Map<String, dynamic> data = json.decode(responseBody);
     final List<dynamic> results = data['results'];
     
     return results.map((json) => Item.fromJson(json)).toList();
@@ -67,50 +74,62 @@ Future<List<Item>> fetchItems() async {
   }
 }
 
-// 1. **NUEVA FUNCIÓN:** Obtener producto por ID (GET /api/Productos/{id})
+
+/// 2. Obtener producto por ID (GET /api/Productos/{id})
 Future<Item> fetchItemById(String id) async {
-  final response = await http.get(Uri.parse('$_apiUrl/$id'));
+  Uri uri = Uri.parse('$_apiUrl/$id');
+  HttpClientRequest request = await _httpClient.getUrl(uri);
+  HttpClientResponse response = await request.close();
   
   if (response.statusCode == 200) {
+    final responseBody = await response.transform(utf8.decoder).join();
     // Asumiendo que la respuesta es el objeto JSON del producto
-    return Item.fromJson(json.decode(response.body));
+    return Item.fromJson(json.decode(responseBody));
   } else {
     throw Exception('Fallo al cargar el producto con ID $id. Código: ${response.statusCode}');
   }
 }
 
-// Función para crear un nuevo producto (POST /api/Productos)
+/// 3. Función para crear un nuevo producto (POST /api/Productos)
 Future<Item> createItem(Item newItem) async {
-  final url = Uri.parse(_apiUrl);
-  final headers = {"Content-Type": "application/json"};
+  Uri uri = Uri.parse(_apiUrl);
+  HttpClientRequest request = await _httpClient.postUrl(uri);
+  
+  // Establecer encabezados
+  request.headers.set(HttpHeaders.contentTypeHeader, "application/json");
+  
   final body = jsonEncode(newItem.toMapForPost());
-
+  
   debugPrint('Enviando cuerpo POST: $body');
+  
+  // Escribir el cuerpo
+  request.write(body);
 
-  final response = await http.post(
-    url,
-    headers: headers,
-    body: body,
-  );
-
+  HttpClientResponse response = await request.close();
+  
   if (response.statusCode >= 200 && response.statusCode <= 202) {
-    return Item.fromJson(jsonDecode(response.body));
+    final responseBody = await response.transform(utf8.decoder).join();
+    return Item.fromJson(jsonDecode(responseBody));
   } else {
-    debugPrint('Fallo al crear item: ${response.statusCode} - ${response.body}');
+    final responseBody = await response.transform(utf8.decoder).join();
+    debugPrint('Fallo al crear item: ${response.statusCode} - $responseBody');
     throw Exception('Fallo al crear item. Código de estado: ${response.statusCode}');
   }
 }
 
-// 2. **NUEVA FUNCIÓN:** Eliminar producto (DELETE /api/Productos/{id})
+/// 4. Eliminar producto (DELETE /api/Productos/{id})
 Future<void> deleteItem(String id) async {
-  final response = await http.delete(Uri.parse('$_apiUrl/$id'));
+  Uri uri = Uri.parse('$_apiUrl/$id');
+  HttpClientRequest request = await _httpClient.deleteUrl(uri);
+  HttpClientResponse response = await request.close();
   
   // Un DELETE exitoso generalmente devuelve 200 (OK) o 204 (No Content)
   if (response.statusCode == 200 || response.statusCode == 204) {
     debugPrint('Producto con ID $id eliminado exitosamente.');
     // No hay cuerpo de respuesta que parsear
   } else {
-    debugPrint('Fallo al eliminar producto: ${response.statusCode} - ${response.body}');
+    final responseBody = await response.transform(utf8.decoder).join();
+    debugPrint('Fallo al eliminar producto: ${response.statusCode} - $responseBody');
     throw Exception('Fallo al eliminar producto. Código de estado: ${response.statusCode}');
   }
 }
@@ -118,6 +137,9 @@ Future<void> deleteItem(String id) async {
 // -----------------------------------------------------------------------------
 
 void main() {
+  // Asegúrate de cerrar el cliente HTTP cuando la aplicación se detenga.
+  // En una aplicación real, lo manejarías en el `dispose` de un widget de nivel superior
+  // o al cerrar la aplicación. Por simplicidad en este ejemplo, no lo haremos aquí.
   runApp(const MyApp());
 }
 
@@ -358,7 +380,6 @@ class ProductListItem extends StatelessWidget {
                 ],
               ),
             ),
-            // **NUEVO** Botón de eliminación
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.red),
               onPressed: () => _confirmDelete(context), // Mostrar diálogo de confirmación
